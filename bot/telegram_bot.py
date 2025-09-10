@@ -28,6 +28,8 @@ import memory
 memory.init()
 CONTEXT_TURNS = int(os.getenv("CONTEXT_TURNS", "14"))  # про запас, если решим подмешивать прошлые реплики
 
+import scheduler
+
 class ChatGPTTelegramBot:
     """
     Class representing a ChatGPT Telegram Bot.
@@ -1133,5 +1135,9 @@ class ChatGPTTelegramBot:
         application.add_handler(CallbackQueryHandler(self.handle_callback_inline_query))
 
         application.add_error_handler(error_handler)
+
+        async def _send(uid, text):
+            await application.bot.send_message(chat_id=int(uid), text=text)
+        scheduler.start_scheduler(_send)
 
         application.run_polling()
