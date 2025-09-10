@@ -65,12 +65,12 @@ class ChatGPTTelegramBot:
         self.inline_queries_cache = {}
 
     async def profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /profile <текст> — сохранить профиль пользователя; /profile — показать профиль.
-    """
-    if not await is_allowed(self.config, update, context):
-        await self.send_disallowed_message(update, context)
-        return
+        """
+        /profile <текст> — сохранить профиль пользователя; /profile — показать профиль.
+        """
+        if not await is_allowed(self.config, update, context):
+            await self.send_disallowed_message(update, context)
+            return
 
     user_id = str(update.message.from_user.id)
     text = (update.message.text or "").split(" ", 1)
@@ -807,11 +807,20 @@ class ChatGPTTelegramBot:
                     i += 1
                     if tokens != 'not_finished':
                         total_tokens = int(tokens)
+                        
+                # сохранение финального текста ответа ассистента
+                if final_stream_text:
+                    memory.save_message(user_id_str, "assistant", final_stream_text)
+
+            
 
             else:
                 async def _reply():
                     nonlocal total_tokens
                     response, total_tokens = await self.openai.get_chat_response(chat_id=chat_id, query=augmented_prompt)
+                    # сохранить полный ответ ассистента
+                    memory.save_message(user_id_str, "assistant", response)
+
 
                     if is_direct_result(response):
                         return await handle_direct_result(self.config, update, response)
