@@ -71,23 +71,23 @@ class ChatGPTTelegramBot:
         if not await is_allowed(self.config, update, context):
             await self.send_disallowed_message(update, context)
             return
-
-    user_id = str(update.message.from_user.id)
-    text = (update.message.text or "").split(" ", 1)
-
-    if len(text) == 1:
-        info = memory.get_profile(user_id)
+    
+        user_id = str(update.message.from_user.id)
+        text = (update.message.text or "").split(" ", 1)
+    
+        if len(text) == 1:
+            info = memory.get_profile(user_id)
+            await update.effective_message.reply_text(
+                message_thread_id=get_thread_id(update),
+                text=("Текущий профиль:\n" + (info or "пусто"))
+            )
+            return
+    
+        memory.upsert_profile(user_id, text[1].strip())
         await update.effective_message.reply_text(
             message_thread_id=get_thread_id(update),
-            text=("Текущий профиль:\n" + (info or "пусто"))
+            text="Сохранил профиль 👍"
         )
-        return
-
-    memory.upsert_profile(user_id, text[1].strip())
-    await update.effective_message.reply_text(
-        message_thread_id=get_thread_id(update),
-        text="Сохранил профиль 👍"
-    )
 
 
     async def help(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
