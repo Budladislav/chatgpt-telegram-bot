@@ -23,6 +23,10 @@ from utils import is_group_chat, get_thread_id, message_text, wrap_with_indicato
 from openai_helper import OpenAIHelper, localized_text
 from usage_tracker import UsageTracker
 
+# --- MEMORY INIT ---
+import memory
+memory.init()
+CONTEXT_TURNS = int(os.getenv("CONTEXT_TURNS", "14"))  # про запас, если решим подмешивать прошлые реплики
 
 class ChatGPTTelegramBot:
     """
@@ -59,6 +63,32 @@ class ChatGPTTelegramBot:
         self.usage = {}
         self.last_message = {}
         self.inline_queries_cache = {}
+
+    async def profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /profile <текст> — сохранить профиль пользователя; /profile — показать профиль.
+    """
+    if not await is_allowed(self.config, update, context):
+        await self.send_disallowed_message(update, context)
+        return
+
+    user_id = str(update.message.from_user.id)
+    text = (update.message.text or "").split(" ", 1)
+
+    if len(text) == 1:
+        info = memory.get_profile(user_id)
+        await update.effective_message.reply_text(
+            message_thread_id=get_thread_id(update),
+            text=("Текущий профиль:\n" + (info or "пусто"))
+        )
+        return
+
+    memory.upsert_profile(user_id, text[1].strip())
+    await update.effective_message.reply_text(
+        message_thread_id=get_thread_id(update),
+        text="Сохранил профиль 👍"
+    )
+
 
     async def help(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         """
@@ -660,6 +690,17 @@ class ChatGPTTelegramBot:
         prompt = message_text(update.message)
         self.last_message[chat_id] = prompt
 
+        # --- MEMORY: save user message + load profile ---
+        user_id_str = str(user_id)
+        memory.save_message(user_id_str, "user", prompt)
+        user_profile = memory.get_profile(user_id_str)
+
+        # Подмешаем профиль в запрос (мягко, одной строкой):
+        augmented_prompt = prompt
+        if user_profile:
+            augmented_prompt = f"[Профиль пользователя: {user_profile}]\n{prompt}"
+
+
         if is_group_chat(update):
             trigger_keyword = self.config['group_trigger_keyword']
 
@@ -687,7 +728,8 @@ class ChatGPTTelegramBot:
                     message_thread_id=get_thread_id(update)
                 )
 
-                stream_response = self.openai.get_chat_response_stream(chat_id=chat_id, query=prompt)
+                stream_response = self.openai.get_chat_response_stream(chat_id=chat_id, query=augmented_prompt)
+                final_stream_text = "" 
                 i = 0
                 prev = ''
                 sent_message = None
@@ -700,6 +742,8 @@ class ChatGPTTelegramBot:
 
                     if len(content.strip()) == 0:
                         continue
+
+                    final_stream_text = content  # <— ДОБАВИТЬ: всегда держим последнее состояние текста
 
                     stream_chunks = split_into_chunks(content)
                     if len(stream_chunks) > 1:
@@ -767,7 +811,7 @@ class ChatGPTTelegramBot:
             else:
                 async def _reply():
                     nonlocal total_tokens
-                    response, total_tokens = await self.openai.get_chat_response(chat_id=chat_id, query=prompt)
+                    response, total_tokens = await self.openai.get_chat_response(chat_id=chat_id, query=augmented_prompt)
 
                     if is_direct_result(response):
                         return await handle_direct_result(self.config, update, response)
@@ -1062,6 +1106,7 @@ class ChatGPTTelegramBot:
         application.add_handler(CommandHandler('start', self.help))
         application.add_handler(CommandHandler('stats', self.stats))
         application.add_handler(CommandHandler('resend', self.resend))
+        application.add_handler(CommandHandler('profile', self.profile))
         application.add_handler(CommandHandler(
             'chat', self.prompt, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)
         )
